@@ -1,0 +1,8 @@
+streamlit>=1.40
+pandas>=2.2
+numpy>=1.26
+scipy>=1.13
+statsmodels>=0.14
+python-dotenv>=1.0
+requests>=2.32
+google-genai>=1.0
