@@ -164,7 +164,42 @@ def _gemini_client():
         raise RuntimeError("GEMINI_API_KEY is missing. Add it to .env or keep AI_PROVIDER=MOCK for testing.")
     return genai.Client(api_key=api_key)
 
+def _gemini_generate_with_retry(client, *, model, contents, config, max_attempts=3):
+    """
+    Call Gemini with retries for temporary server/rate-limit failures.
 
+    Raises the final exception if all attempts fail.
+    """
+    from google.genai import errors
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+
+        except (errors.ServerError, errors.ClientError) as exc:
+            status_code = getattr(exc, "code", None)
+
+            # Retry temporary errors:
+            # 429 = rate limit
+            # 500/502/503/504 = temporary server/service errors
+            retryable = status_code in {429, 500, 502, 503, 504}
+
+            # ServerError is normally temporary even if the SDK doesn't
+            # expose the status code cleanly.
+            if isinstance(exc, errors.ServerError):
+                retryable = True
+
+            if not retryable or attempt == max_attempts:
+                raise
+
+            # Small exponential backoff + jitter:
+            # ~1s, ~2s, ~4s
+            delay = (2 ** (attempt - 1)) + random.uniform(0, 0.5)
+            time.sleep(delay)
 def gemini_text(
     conversation: List[dict],
     catalog_text: str,
@@ -268,15 +303,17 @@ CURRENT RANKING:
 {ranking_text}
 """
 
-    response = client.models.generate_content(
-        model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+    model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    
+    response = _gemini_generate_with_retry(
+        client,
+        model=model,
         contents=contents,
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
             max_output_tokens=500,
         ),
     )
-
     return response.text
 
 
@@ -385,8 +422,11 @@ TRANSCRIPT:
 {transcript}
 """
 
-    response = client.models.generate_content(
-        model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+    model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    
+    response = _gemini_generate_with_retry(
+        client,
+        model=model,
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
