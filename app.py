@@ -296,19 +296,56 @@ elif st.session_state.page == "ai_chat":
             st.write(m["content"])
 
     prompt = st.chat_input("e.g. 'I mostly travel and I don't want to charge every day'...")
-    if prompt:
-        st.session_state.chat.append({"role": "user", "content": prompt})
+if prompt:
+    st.session_state.chat.append({
+        "role": "user",
+        "content": prompt
+    })
+
+    try:
         with st.spinner("Updating the consultation..."):
             text, weights, concerns, ranked = get_response(
                 st.session_state.chat,
                 catalog_text(),
                 normalize_weights(st.session_state.baseline_ratings),
             )
-        st.session_state.ai_weights = weights
-        st.session_state.ai_concerns = concerns
-        st.session_state.ai_ranked = ranked.to_dict("records")
-        st.session_state.chat.append({"role": "assistant", "content": text})
-        st.rerun()
+
+    except Exception as exc:
+        # Log the actual error on the Streamlit server for debugging.
+        print(
+            f"[Gemini consultation error] "
+            f"participant={st.session_state.participant_id} "
+            f"type={type(exc).__name__} "
+            f"error={exc}"
+        )
+
+        # Remove the failed message so the participant can send it again.
+        if (
+            st.session_state.chat
+            and st.session_state.chat[-1]["role"] == "user"
+            and st.session_state.chat[-1]["content"] == prompt
+        ):
+            st.session_state.chat.pop()
+
+        st.error(
+            "The AI consultant is temporarily unavailable. "
+            "Your study session is still active. Please wait a moment "
+            "and send your message again."
+        )
+
+        st.stop()
+    
+        else:
+            st.session_state.ai_weights = weights
+            st.session_state.ai_concerns = concerns
+            st.session_state.ai_ranked = ranked.to_dict("records")
+    
+            st.session_state.chat.append({
+                "role": "assistant",
+                "content": text
+            })
+    
+            st.rerun()
 
     # Show the current full ranking after every substantive turn. This is deliberately visible so
     # the participant never has to remember which products the AI mentioned earlier.
